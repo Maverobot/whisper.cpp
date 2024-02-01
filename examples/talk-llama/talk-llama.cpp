@@ -74,10 +74,13 @@ struct whisper_params {
     std::string language    = "en";
     std::string model_wsp   = "models/ggml-base.en.bin";
     std::string model_llama = "models/ggml-llama-7B.bin";
+    std::vector<std::tuple<std::string, float>> model_llama_lora_adapter; // lora adapter path with user defined scale
+    std::string model_llama_lora_base  = "";                              // base model path for the lora adapter
     std::string speak       = "./examples/talk-llama/speak";
     std::string prompt      = "";
     std::string fname_out;
     std::string path_session = "";       // path to file for saving/loading model eval state
+    bool use_mmap           = true;      // use mmap for faster loads
 };
 
 void whisper_print_usage(int argc, char ** argv, const whisper_params & params);
@@ -90,38 +93,43 @@ bool whisper_params_parse(int argc, char ** argv, whisper_params & params) {
             whisper_print_usage(argc, argv, params);
             exit(0);
         }
-        else if (arg == "-t"   || arg == "--threads")        { params.n_threads      = std::stoi(argv[++i]); }
-        else if (arg == "-vms" || arg == "--voice-ms")       { params.voice_ms       = std::stoi(argv[++i]); }
-        else if (arg == "-c"   || arg == "--capture")        { params.capture_id     = std::stoi(argv[++i]); }
-        else if (arg == "-mt"  || arg == "--max-tokens")     { params.max_tokens     = std::stoi(argv[++i]); }
-        else if (arg == "-ac"  || arg == "--audio-ctx")      { params.audio_ctx      = std::stoi(argv[++i]); }
-        else if (arg == "-ngl" || arg == "--n-gpu-layers")   { params.n_gpu_layers   = std::stoi(argv[++i]); }
-        else if (arg == "-vth" || arg == "--vad-thold")      { params.vad_thold      = std::stof(argv[++i]); }
-        else if (arg == "-fth" || arg == "--freq-thold")     { params.freq_thold     = std::stof(argv[++i]); }
-        else if (arg == "-su"  || arg == "--speed-up")       { params.speed_up       = true; }
-        else if (arg == "-tr"  || arg == "--translate")      { params.translate      = true; }
-        else if (arg == "-ps"  || arg == "--print-special")  { params.print_special  = true; }
-        else if (arg == "-pe"  || arg == "--print-energy")   { params.print_energy   = true; }
-        else if (arg == "-vp"  || arg == "--verbose-prompt") { params.verbose_prompt = true; }
-        else if (arg == "-ng"  || arg == "--no-gpu")         { params.use_gpu        = false; }
-        else if (arg == "-p"   || arg == "--person")         { params.person         = argv[++i]; }
-        else if (arg == "-bn"   || arg == "--bot-name")      { params.bot_name       = argv[++i]; }
-        else if (arg == "--session")                         { params.path_session   = argv[++i]; }
-        else if (arg == "-w"   || arg == "--wake-command")   { params.wake_cmd       = argv[++i]; }
-        else if (arg == "-ho"  || arg == "--heard-ok")       { params.heard_ok       = argv[++i]; }
-        else if (arg == "-l"   || arg == "--language")       { params.language       = argv[++i]; }
-        else if (arg == "-mw"  || arg == "--model-whisper")  { params.model_wsp      = argv[++i]; }
-        else if (arg == "-ml"  || arg == "--model-llama")    { params.model_llama    = argv[++i]; }
-        else if (arg == "-s"   || arg == "--speak")          { params.speak          = argv[++i]; }
-        else if (arg == "--prompt-file")                     {
+        else if (arg == "-t"   || arg == "--threads")                    { params.n_threads             = std::stoi(argv[++i]); }
+        else if (arg == "-vms" || arg == "--voice-ms")                   { params.voice_ms              = std::stoi(argv[++i]); }
+        else if (arg == "-c"   || arg == "--capture")                    { params.capture_id            = std::stoi(argv[++i]); }
+        else if (arg == "-mt"  || arg == "--max-tokens")                 { params.max_tokens            = std::stoi(argv[++i]); }
+        else if (arg == "-ac"  || arg == "--audio-ctx")                  { params.audio_ctx             = std::stoi(argv[++i]); }
+        else if (arg == "-ngl" || arg == "--n-gpu-layers")               { params.n_gpu_layers          = std::stoi(argv[++i]); }
+        else if (arg == "-vth" || arg == "--vad-thold")                  { params.vad_thold             = std::stof(argv[++i]); }
+        else if (arg == "-fth" || arg == "--freq-thold")                 { params.freq_thold            = std::stof(argv[++i]); }
+        else if (arg == "-su"  || arg == "--speed-up")                   { params.speed_up              = true; }
+        else if (arg == "-tr"  || arg == "--translate")                  { params.translate             = true; }
+        else if (arg == "-ps"  || arg == "--print-special")              { params.print_special         = true; }
+        else if (arg == "-pe"  || arg == "--print-energy")               { params.print_energy          = true; }
+        else if (arg == "-vp"  || arg == "--verbose-prompt")             { params.verbose_prompt        = true; }
+        else if (arg == "-ng"  || arg == "--no-gpu")                     { params.use_gpu               = false; }
+        else if (arg == "-p"   || arg == "--person")                     { params.person                = argv[++i]; }
+        else if (arg == "-bn"   || arg == "--bot-name")                  { params.bot_name              = argv[++i]; }
+        else if (arg == "--session")                                     { params.path_session          = argv[++i]; }
+        else if (arg == "-w"   || arg == "--wake-command")               { params.wake_cmd              = argv[++i]; }
+        else if (arg == "-ho"  || arg == "--heard-ok")                   { params.heard_ok              = argv[++i]; }
+        else if (arg == "-l"   || arg == "--language")                   { params.language              = argv[++i]; }
+        else if (arg == "-mw"  || arg == "--model-whisper")              { params.model_wsp             = argv[++i]; }
+        else if (arg == "-ml"  || arg == "--model-llama")                { params.model_llama           = argv[++i]; }
+        else if (arg == "-mll"  || arg == "--model-llama-lora")          {
+            params.model_llama_lora_adapter.push_back(std::make_tuple(argv[++i], 1.0f));
+            params.use_mmap = false;
+        }
+        else if (arg == "-mllb"  || arg == "--model-llama-lora-base")    { params.model_llama_lora_base = argv[++i]; }
+        else if (arg == "-s"   || arg == "--speak")                      { params.speak                 = argv[++i]; }
+        else if (arg == "--prompt-file")                                 {
             std::ifstream file(argv[++i]);
             std::copy(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>(), back_inserter(params.prompt));
             if (params.prompt.back() == '\n') {
                 params.prompt.pop_back();
             }
         }
-        else if (arg == "-f"   || arg == "--file")          { params.fname_out     = argv[++i]; }
-        else if (arg == "-ng"  || arg == "--no-gpu")        { params.use_gpu       = false; }
+        else if (arg == "-f"   || arg == "--file")                       { params.fname_out             = argv[++i]; }
+        else if (arg == "-ng"  || arg == "--no-gpu")                     { params.use_gpu               = false; }
         else {
             fprintf(stderr, "error: unknown argument: %s\n", arg.c_str());
             whisper_print_usage(argc, argv, params);
@@ -137,32 +145,34 @@ void whisper_print_usage(int /*argc*/, char ** argv, const whisper_params & para
     fprintf(stderr, "usage: %s [options]\n", argv[0]);
     fprintf(stderr, "\n");
     fprintf(stderr, "options:\n");
-    fprintf(stderr, "  -h,       --help           [default] show this help message and exit\n");
-    fprintf(stderr, "  -t N,     --threads N      [%-7d] number of threads to use during computation\n", params.n_threads);
-    fprintf(stderr, "  -vms N,   --voice-ms N     [%-7d] voice duration in milliseconds\n",              params.voice_ms);
-    fprintf(stderr, "  -c ID,    --capture ID     [%-7d] capture device ID\n",                           params.capture_id);
-    fprintf(stderr, "  -mt N,    --max-tokens N   [%-7d] maximum number of tokens per audio chunk\n",    params.max_tokens);
-    fprintf(stderr, "  -ac N,    --audio-ctx N    [%-7d] audio context size (0 - all)\n",                params.audio_ctx);
-    fprintf(stderr, "  -ngl N,   --n-gpu-layers N [%-7d] number of layers to store in VRAM\n",           params.n_gpu_layers);
-    fprintf(stderr, "  -vth N,   --vad-thold N    [%-7.2f] voice activity detection threshold\n",        params.vad_thold);
-    fprintf(stderr, "  -fth N,   --freq-thold N   [%-7.2f] high-pass frequency cutoff\n",                params.freq_thold);
-    fprintf(stderr, "  -su,      --speed-up       [%-7s] speed up audio by x2 (reduced accuracy)\n",     params.speed_up ? "true" : "false");
-    fprintf(stderr, "  -tr,      --translate      [%-7s] translate from source language to english\n",   params.translate ? "true" : "false");
-    fprintf(stderr, "  -ps,      --print-special  [%-7s] print special tokens\n",                        params.print_special ? "true" : "false");
-    fprintf(stderr, "  -pe,      --print-energy   [%-7s] print sound energy (for debugging)\n",          params.print_energy ? "true" : "false");
-    fprintf(stderr, "  -vp,      --verbose-prompt [%-7s] print prompt at start\n",                       params.verbose_prompt ? "true" : "false");
-    fprintf(stderr, "  -ng,      --no-gpu         [%-7s] disable GPU\n",                                 params.use_gpu ? "false" : "true");
-    fprintf(stderr, "  -p NAME,  --person NAME    [%-7s] person name (for prompt selection)\n",          params.person.c_str());
-    fprintf(stderr, "  -bn NAME, --bot-name NAME  [%-7s] bot name (to display)\n",                       params.bot_name.c_str());
-    fprintf(stderr, "  -w TEXT,  --wake-command T [%-7s] wake-up command to listen for\n",               params.wake_cmd.c_str());
-    fprintf(stderr, "  -ho TEXT, --heard-ok TEXT  [%-7s] said by TTS before generating reply\n",         params.heard_ok.c_str());
-    fprintf(stderr, "  -l LANG,  --language LANG  [%-7s] spoken language\n",                             params.language.c_str());
-    fprintf(stderr, "  -mw FILE, --model-whisper  [%-7s] whisper model file\n",                          params.model_wsp.c_str());
-    fprintf(stderr, "  -ml FILE, --model-llama    [%-7s] llama model file\n",                            params.model_llama.c_str());
-    fprintf(stderr, "  -s FILE,  --speak TEXT     [%-7s] command for TTS\n",                             params.speak.c_str());
-    fprintf(stderr, "  --prompt-file FNAME        [%-7s] file with custom prompt to start dialog\n",     "");
-    fprintf(stderr, "  --session FNAME                   file to cache model state in (may be large!) (default: none)\n");
-    fprintf(stderr, "  -f FNAME, --file FNAME     [%-7s] text output file name\n",                       params.fname_out.c_str());
+    fprintf(stderr, "  -h,         --help                      [default] show this help message and exit\n");
+    fprintf(stderr, "  -t N,       --threads N                 [%-7d] number of threads to use during computation\n",                                     params.n_threads);
+    fprintf(stderr, "  -vms N,     --voice-ms N                [%-7d] voice duration in milliseconds\n",                                                  params.voice_ms);
+    fprintf(stderr, "  -c ID,      --capture ID                [%-7d] capture device ID\n",                                                               params.capture_id);
+    fprintf(stderr, "  -mt N,      --max-tokens N              [%-7d] maximum number of tokens per audio chunk\n",                                        params.max_tokens);
+    fprintf(stderr, "  -ac N,      --audio-ctx N               [%-7d] audio context size (0 - all)\n",                                                    params.audio_ctx);
+    fprintf(stderr, "  -ngl N,     --n-gpu-layers N            [%-7d] number of layers to store in VRAM\n",                                               params.n_gpu_layers);
+    fprintf(stderr, "  -vth N,     --vad-thold N               [%-7.2f] voice activity detection threshold\n",                                            params.vad_thold);
+    fprintf(stderr, "  -fth N,     --freq-thold N              [%-7.2f] high-pass frequency cutoff\n",                                                    params.freq_thold);
+    fprintf(stderr, "  -su,        --speed-up                  [%-7s] speed up audio by x2 (reduced accuracy)\n",                                         params.speed_up ? "true" : "false");
+    fprintf(stderr, "  -tr,        --translate                 [%-7s] translate from source language to english\n",                                       params.translate ? "true" : "false");
+    fprintf(stderr, "  -ps,        --print-special             [%-7s] print special tokens\n",                                                            params.print_special ? "true" : "false");
+    fprintf(stderr, "  -pe,        --print-energy              [%-7s] print sound energy (for debugging)\n",                                              params.print_energy ? "true" : "false");
+    fprintf(stderr, "  -vp,        --verbose-prompt            [%-7s] print prompt at start\n",                                                           params.verbose_prompt ? "true" : "false");
+    fprintf(stderr, "  -ng,        --no-gpu                    [%-7s] disable GPU\n",                                                                     params.use_gpu ? "false" : "true");
+    fprintf(stderr, "  -p NAME,    --person NAME               [%-7s] person name (for prompt selection)\n",                                              params.person.c_str());
+    fprintf(stderr, "  -bn NAME,   --bot-name NAME             [%-7s] bot name (to display)\n",                                                           params.bot_name.c_str());
+    fprintf(stderr, "  -w TEXT,    --wake-command T            [%-7s] wake-up command to listen for\n",                                                   params.wake_cmd.c_str());
+    fprintf(stderr, "  -ho TEXT,   --heard-ok TEXT             [%-7s] said by TTS before generating reply\n",                                             params.heard_ok.c_str());
+    fprintf(stderr, "  -l LANG,    --language LANG             [%-7s] spoken language\n",                                                                 params.language.c_str());
+    fprintf(stderr, "  -mw FILE,   --model-whisper             [%-7s] whisper model file\n",                                                              params.model_wsp.c_str());
+    fprintf(stderr, "  -ml FILE,   --model-llama               [%-7s] llama model file\n",                                                                params.model_llama.c_str());
+    fprintf(stderr, "  -mll FILE,  --model-llama-lora                    apply LoRa adaper (default: none) \n");
+    fprintf(stderr, "  -mllb FILE, --model-llama-lora_base     [%-7s] optional model to use as a base for the layers modified by the LoRA adapter \n",   params.model_llama_lora_base.c_str());
+    fprintf(stderr, "  -s FILE,    --speak TEXT                [%-7s] command for TTS\n",                                                                 params.speak.c_str());
+    fprintf(stderr, "  --prompt-file FNAME                     [%-7s] file with custom prompt to start dialog\n",                                         "");
+    fprintf(stderr, "  --session FNAME                                   file to cache model state in (may be large!) (default: none)\n");
+    fprintf(stderr, "  -f FNAME, --file FNAME                  [%-7s] text output file name\n",                                                           params.fname_out.c_str());
     fprintf(stderr, "\n");
 }
 
@@ -296,6 +306,7 @@ int main(int argc, char ** argv) {
     } else {
         lmparams.n_gpu_layers = params.n_gpu_layers;
     }
+    lmparams.use_mmap = params.use_mmap;
 
     struct llama_model * model_llama = llama_load_model_from_file(params.model_llama.c_str(), lmparams);
 
@@ -307,6 +318,24 @@ int main(int argc, char ** argv) {
     lcparams.n_threads  = params.n_threads;
 
     struct llama_context * ctx_llama = llama_new_context_with_model(model_llama, lcparams);
+
+    for (unsigned int i = 0; i < params.model_llama_lora_adapter.size(); ++i) {
+        const std::string& model_llama_lora_adapter = std::get<0>(params.model_llama_lora_adapter[i]);
+        float lora_scale = std::get<1>(params.model_llama_lora_adapter[i]);
+        int err = llama_model_apply_lora_from_file(model_llama,
+                                             model_llama_lora_adapter.c_str(),
+                                             lora_scale,
+                                             ((i > 0) || params.model_llama_lora_base.empty())
+                                                ? NULL
+                                                : params.model_llama_lora_base.c_str(),
+                                             params.n_threads);
+        if (err != 0) {
+            fprintf(stderr, "%s: error: failed to apply lora adapter\n", __func__);
+            llama_free(ctx_llama);
+            llama_free_model(model_llama);
+            return 1;
+        }
+    }
 
     // print some info about the processing
     {
